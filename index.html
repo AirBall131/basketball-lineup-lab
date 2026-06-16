@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>NBA 阵容评价器</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="topbar" aria-label="阵容生成">
+        <div>
+          <p class="eyebrow">NBA Lineup Lab</p>
+          <h1>阵容评价器</h1>
+        </div>
+        <div class="topbar-actions">
+          <button id="draftBtn" class="primary-btn" type="button">重新开始</button>
+          <button id="sampleBtn" class="icon-btn" type="button" title="载入示例阵容" aria-label="载入示例阵容">
+            <span aria-hidden="true">↻</span>
+          </button>
+        </div>
+      </section>
+
+      <section class="workspace">
+        <div class="draft-panel" aria-label="抽取结果">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Draft Pool</p>
+              <h2>抽到的球员版本</h2>
+            </div>
+            <span id="draftState" class="status-pill">等待抽取</span>
+          </div>
+          <div class="draft-machine" aria-label="逐步抽取">
+            <div class="machine-stage">
+              <span>球队</span>
+              <strong id="teamRoll">未选择</strong>
+              <button id="rollTeamBtn" class="secondary-btn" type="button">随机球队</button>
+            </div>
+            <div class="machine-stage">
+              <span>年代</span>
+              <strong id="decadeRoll">未选择</strong>
+              <button id="rollDecadeBtn" class="secondary-btn" type="button">随机年代</button>
+            </div>
+            <div class="machine-stage">
+              <span>候选球员</span>
+              <strong id="playerRoll">未选择</strong>
+              <select id="playerChoice" class="player-choice" aria-label="选择球员"></select>
+            </div>
+            <div class="machine-actions">
+              <button id="addPlayerBtn" class="primary-btn" type="button">加入所选球员</button>
+            </div>
+            <p id="draftMessage" class="draft-message">第 1 轮：请先随机球队，再随机年代，最后选择球员。</p>
+          </div>
+          <div id="draftCards" class="draft-grid"></div>
+        </div>
+
+        <div class="court-panel" aria-label="阵容摆放">
+          <div class="court-heading">
+            <div>
+              <p class="eyebrow">Lineup</p>
+              <h2>摆放位置</h2>
+            </div>
+            <button id="evaluateBtn" class="primary-btn" type="button">评价阵容</button>
+          </div>
+
+          <div class="court">
+            <div class="paint"></div>
+            <div class="rim"></div>
+            <div class="arc"></div>
+            <div class="slot pg" data-position="PG"></div>
+            <div class="slot sg" data-position="SG"></div>
+            <div class="slot sf" data-position="SF"></div>
+            <div class="slot pf" data-position="PF"></div>
+            <div class="slot c" data-position="C"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="resultPanel" class="result-panel is-empty" aria-live="polite">
+        <div class="result-placeholder">
+          <p class="eyebrow">Scouting Report</p>
+          <h2>抽取球员并完成五个位置后，这里会生成战绩预测。</h2>
+        </div>
+      </section>
+    </main>
+
+    <template id="draftCardTemplate">
+      <article class="player-card">
+        <div class="player-card-head">
+          <div>
+            <p class="player-context"></p>
+            <h3 class="player-name"></h3>
+          </div>
+          <span class="overall-badge"></span>
+        </div>
+        <p class="version-label"></p>
+        <p class="player-note"></p>
+        <div class="rating-row"></div>
+      </article>
+    </template>
+
+    <template id="slotTemplate">
+      <label class="slot-control">
+        <span class="slot-label"></span>
+        <select></select>
+      </label>
+      <div class="slot-player"></div>
+    </template>
+
+    <script src="data/full-rosters.js?v=20260616-notes" charset="utf-8"></script>
+    <script src="data/recent-rosters.js?v=20260616-notes" charset="utf-8"></script>
+    <script src="app.js?v=20260616-notes" charset="utf-8"></script>
+  </body>
+</html>
