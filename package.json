@@ -1,0 +1,17 @@
+{
+  "name": "basketball",
+  "version": "1.0.0",
+  "description": "一个本地静态网页原型。玩家每轮先随机球队，再随机年代，然后从该球队该年代的候选球员名单里自主选择一名球员。重复五轮后，把五名球员摆放到 PG / SG / SF / PF / C，并生成阵容评价和 82 场常规赛胜场预测。",
+  "main": "app.js",
+  "scripts": {
+    "profiles": "node tools/build-player-profile-pack.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.104.2"
+  }
+}

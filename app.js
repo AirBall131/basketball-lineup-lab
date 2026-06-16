@@ -1845,7 +1845,7 @@ addCandidateSet("Sacramento Kings", "国王", "2020s", [
 ]);
 
 addCandidateSet("San Antonio Spurs", "马刺", "2020s", [
-  { name: "Victor Wembanyama", cn: "文班亚马", role: "star", positions: ["C", "PF"], version: "2024-25文班亚马", note: "护框覆盖、面框持球和投射想象力同时拉满，是少数能从防守端和进攻端一起重塑球队的内线。", ratings: { overall: 93, scoring: 90, creation: 78, shooting: 82, defense: 96, rim: 99, rebounding: 90 } },
+  { name: "Victor Wembanyama", cn: "文班亚马", role: "star", positions: ["C", "PF"], version: "2023-26文班亚马", note: "护框覆盖、面框持球和投射想象力同时拉满，是少数能从防守端和进攻端一起重塑球队的内线。", ratings: { overall: 93, scoring: 90, creation: 78, shooting: 82, defense: 96, rim: 99, rebounding: 90 } },
   { name: "De'Aaron Fox", cn: "福克斯", role: "star", positions: ["PG"], version: "2024-26福克斯", sortBoost: 800, note: "马刺版本给文班亚马身边补上顶级速度和挡拆施压，转换推进和突破分球能大幅提高进攻节奏。", ratings: { overall: 91, scoring: 91, creation: 88, shooting: 82, spacing: 82, defense: 76, rebounding: 70, clutch: 92, ball: 91, portability: 87 } },
   { name: "Dejounte Murray", cn: "默里", role: "leadGuard", version: "2020-22默里", ratings: { overall: 87, creation: 86, defense: 86, rebounding: 82 } },
   { name: "Keldon Johnson", cn: "凯尔登约翰逊", role: "wing", version: "2020-25凯尔登约翰逊", ratings: { scoring: 82, rebounding: 74 } },
@@ -1920,6 +1920,24 @@ function seasonSpanLabel(seasons) {
 
 function cleanPlayerName(name) {
   return String(name || "").replace(/\*/g, "").replace(/\s+/g, " ").trim();
+}
+
+function getPlayerIdentityName(name) {
+  return cleanPlayerName(name)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/Đ/g, "D")
+    .replace(/đ/g, "d")
+    .replace(/Ł/g, "L")
+    .replace(/ł/g, "l")
+    .replace(/Ø/g, "O")
+    .replace(/ø/g, "o")
+    .replace(/Þ/g, "Th")
+    .replace(/þ/g, "th")
+    .replace(/Æ/g, "AE")
+    .replace(/æ/g, "ae")
+    .replace(/Œ/g, "OE")
+    .replace(/œ/g, "oe");
 }
 
 function getKnownTeamCn(team, fallback = "") {
@@ -2280,7 +2298,7 @@ function getPlayerCnName(name) {
 }
 
 function getKnownPlayerCnName(name) {
-  const cleanName = cleanPlayerName(name);
+  const cleanName = getPlayerIdentityName(name);
   return PLAYER_CN_BY_NAME[cleanName] || "";
 }
 
@@ -2553,6 +2571,16 @@ function strongerImpactTier(base, extra) {
   return (order[extra] || 0) > (order[base] || 0) ? extra : base;
 }
 
+function extendVersionToMergedSeasons(version, seasons = []) {
+  if (!version || !seasons.length) return version;
+  const latestSeasonEnd = Math.max(...seasons);
+  if (!Number.isFinite(latestSeasonEnd)) return version;
+  const latestVersionEnd = String(latestSeasonEnd).slice(-2);
+  return String(version).replace(/^(\d{4})-(\d{2})/, (match, start, end) => {
+    return Number(end) < Number(latestVersionEnd) ? `${start}-${latestVersionEnd}` : match;
+  });
+}
+
 function isCuratedPlayer(player) {
   return player.curated || !player.source;
 }
@@ -2568,7 +2596,7 @@ function mergeFullRosterPlayers() {
   const playersByKey = new Map(PLAYER_POOL.map((player) => [getPlayerKey(player), player]));
   externalPlayers.forEach((candidate) => {
     const candidateName = cleanPlayerName(candidate.name);
-    const key = `${candidateName}|${getCurrentTeamName(candidate.team)}|${candidate.decade}`;
+    const key = `${getPlayerIdentityName(candidateName)}|${getCurrentTeamName(candidate.team)}|${candidate.decade}`;
     if (!candidateName || !candidate.team || !candidate.decade) {
       return;
     }
@@ -2590,6 +2618,7 @@ function mergeFullRosterPlayers() {
 
       const mergedTemplate = templateForPositions(existing.positions);
       if (wasCurated) {
+        existing.version = extendVersionToMergedSeasons(existing.version, existing.seasons);
         return;
       } else {
         const mergedLabel = seasonSpanLabel(existing.seasons);
@@ -2628,6 +2657,48 @@ function mergeFullRosterPlayers() {
 }
 
 mergeFullRosterPlayers();
+
+function injectLlmProfiles() {
+  if (typeof window === "undefined" || !window.PLAYER_PROFILES) return;
+  const profiles = window.PLAYER_PROFILES;
+  const profileKeys = Object.keys(profiles);
+  if (!profileKeys.length) return;
+
+  let injected = 0;
+  let skippedCurated = 0;
+
+  profileKeys.forEach((key) => {
+    const profile = profiles[key];
+    if (!profile || !profile.note) return;
+
+    // Find matching player in PLAYER_POOL by "name|currentTeam|decade" key
+    const player = PLAYER_POOL.find((p) => getPlayerKey(p) === key);
+    if (!player) return;
+
+    // Never override curated hand-written profiles unless the profile pack explicitly
+    // targets a generated candidate-set note.
+    if (isCuratedPlayer(player) && profile.force !== true) {
+      skippedCurated++;
+      return;
+    }
+
+    // Inject LLM-generated fields
+    if (profile.note) player.note = profile.note;
+    if (profile.tags && Array.isArray(profile.tags)) player.tags = profile.tags;
+    if (profile.ratings && typeof profile.ratings === "object") {
+      player.ratings = { ...player.ratings, ...profile.ratings };
+    }
+    injected++;
+  });
+
+  if (injected || skippedCurated) {
+    console.log(
+      `player-profiles: injected=${injected}, skipped-curated=${skippedCurated}`
+    );
+  }
+}
+
+injectLlmProfiles();
 
 let draftedPlayers = [];
 let currentRoll = {
@@ -2669,7 +2740,7 @@ function randomItem(items) {
 }
 
 function getPlayerKey(player) {
-  return `${cleanPlayerName(player.name)}|${getCurrentTeamName(player.team)}|${player.decade}`;
+  return `${getPlayerIdentityName(player.name)}|${getCurrentTeamName(player.team)}|${player.decade}`;
 }
 
 function getPlayerByKey(key) {
@@ -2703,12 +2774,12 @@ function teamExistedInDecade(team, decade) {
 }
 
 function getAvailableCandidates(team, decade) {
-  const usedNames = new Set(draftedPlayers.map((player) => player.name));
+  const usedNames = new Set(draftedPlayers.map((player) => getPlayerIdentityName(player.name)));
   const currentTeam = getCurrentTeamName(team);
   return PLAYER_POOL.filter((player) =>
     getCurrentTeamName(player.team) === currentTeam &&
     player.decade === decade &&
-    !usedNames.has(player.name)
+    !usedNames.has(getPlayerIdentityName(player.name))
   )
     .sort((a, b) => candidateSortScore(b) - candidateSortScore(a) || a.name.localeCompare(b.name))
     .slice(0, MAX_CANDIDATES_PER_CONTEXT);
