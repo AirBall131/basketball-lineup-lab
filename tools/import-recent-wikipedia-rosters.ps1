@@ -2,7 +2,8 @@ param(
   [int]$StartSeasonEnd = 2022,
   [int]$EndSeasonEnd = 2026,
   [string]$InputFile = "data/recent-rosters.js",
-  [string]$OutputFile = "data/recent-rosters.js"
+  [string]$OutputFile = "data/recent-rosters.js",
+  [switch]$Reset
 )
 
 $ErrorActionPreference = "Stop"
@@ -66,7 +67,21 @@ function Convert-HtmlText([string]$value) {
 }
 
 function Convert-PlayerName([string]$value) {
-  return ((Convert-HtmlText $value) -replace "\*", "" -replace "\s+", " ").Trim()
+  return ((Convert-HtmlText $value) -replace "\*", "" -replace "[†‡≠]+", "" -replace "\s+", " ").Trim()
+}
+
+function ConvertTo-Positions([string]$value) {
+  $text = Convert-HtmlText $value
+  $positions = @()
+  if ($text -match "PG") { $positions += "PG" }
+  if ($text -match "SG") { $positions += "SG" }
+  if ($text -match "SF") { $positions += "SF" }
+  if ($text -match "PF") { $positions += "PF" }
+  if ($text -match "\bC\b|Center") { $positions += "C" }
+  if (-not $positions.Count -and $text -match "\bG\b|Guard") { $positions += @("PG", "SG") }
+  if (-not $positions.Count -and $text -match "\bF\b|Forward") { $positions += @("SF", "PF") }
+  if (-not $positions.Count) { $positions += "SF" }
+  return @($positions | Select-Object -Unique)
 }
 
 function Convert-Number([string]$value) {
@@ -79,22 +94,21 @@ function Convert-Number([string]$value) {
 }
 
 function Get-RegularSeasonRows([string]$html) {
-  $idx = $html.IndexOf('id="Regular_season_2"')
-  if ($idx -lt 0) { $idx = $html.IndexOf('id="Regular_season"') }
-  if ($idx -lt 0) {
-    $statsIdx = $html.IndexOf('id="Player_statistics"')
-    if ($statsIdx -ge 0) {
-      $regularAfterStats = $html.IndexOf('Regular season', $statsIdx)
-      if ($regularAfterStats -ge 0) { $idx = $regularAfterStats }
-    }
+  $anchors = @('id="Player_statistics"', 'id="Regular_season_2"', 'id="Regular_season"')
+  $seen = @{}
+  $rows = @()
+  foreach ($anchor in $anchors) {
+    $idx = $html.IndexOf($anchor)
+    if ($idx -lt 0) { continue }
+    $tableStart = $html.IndexOf("<table", $idx)
+    if ($tableStart -lt 0 -or $seen.ContainsKey($tableStart)) { continue }
+    $tableEnd = $html.IndexOf("</table>", $tableStart)
+    if ($tableEnd -lt 0) { continue }
+    $seen[$tableStart] = $true
+    $table = $html.Substring($tableStart, $tableEnd - $tableStart)
+    $rows += [regex]::Matches($table, "<tr[\s\S]*?</tr>") | ForEach-Object { $_.Value }
   }
-  if ($idx -lt 0) { return @() }
-  $tableStart = $html.IndexOf("<table", $idx)
-  if ($tableStart -lt 0) { return @() }
-  $tableEnd = $html.IndexOf("</table>", $tableStart)
-  if ($tableEnd -lt 0) { return @() }
-  $table = $html.Substring($tableStart, $tableEnd - $tableStart)
-  return [regex]::Matches($table, "<tr[\s\S]*?</tr>") | ForEach-Object { $_.Value }
+  return $rows
 }
 
 function Parse-PlayerRows([string]$html) {
@@ -102,19 +116,74 @@ function Parse-PlayerRows([string]$html) {
   $players = @()
   foreach ($row in $rows) {
     $cells = [regex]::Matches($row, "<t[dh][^>]*>[\s\S]*?</t[dh]>") | ForEach-Object { $_.Value }
-    if ($cells.Count -lt 12) { continue }
+    if ($cells.Count -lt 9) { continue }
     $name = Convert-PlayerName $cells[0]
     if (-not $name -or $name -eq "Player") { continue }
+    $cellTexts = @($cells | ForEach-Object { Convert-HtmlText $_ })
+    $hasPositionColumn = $cellTexts.Count -gt 1 -and $cellTexts[1] -match "^(PG|SG|SF|PF|C|G|F|G/F|F/C|Guard|Forward|Center)$"
+
+    $positions = @("SF")
+    $games = 0
+    $starts = 0
+    $minutes = 0
+    $points = 0
+    $rebounds = 0
+    $assists = 0
+    $steals = 0
+    $blocks = 0
+
+    if ($hasPositionColumn) {
+      $positions = ConvertTo-Positions $cells[1]
+      $games = Convert-Number $cells[2]
+      $starts = Convert-Number $cells[3]
+      if ($cells.Count -ge 13) {
+        $minutes = [math]::Round($games * (Convert-Number $cells[4]))
+        $rebounds = [math]::Round($games * (Convert-Number $cells[8]))
+        $assists = [math]::Round($games * (Convert-Number $cells[9]))
+        $steals = [math]::Round($games * (Convert-Number $cells[10]))
+        $blocks = [math]::Round($games * (Convert-Number $cells[11]))
+        $points = [math]::Round($games * (Convert-Number $cells[12]))
+      } else {
+        $minutes = [math]::Round((Convert-Number $cells[4]))
+        $rebounds = [math]::Round((Convert-Number $cells[5]))
+        $assists = [math]::Round((Convert-Number $cells[6]))
+        $steals = [math]::Round((Convert-Number $cells[7]))
+        $blocks = [math]::Round((Convert-Number $cells[8]))
+        $points = [math]::Round((Convert-Number $cells[9]))
+      }
+    } elseif ($cells.Count -ge 12) {
+      $games = Convert-Number $cells[1]
+      $starts = Convert-Number $cells[2]
+      $minutes = [math]::Round($games * (Convert-Number $cells[3]))
+      $rebounds = [math]::Round($games * (Convert-Number $cells[7]))
+      $assists = [math]::Round($games * (Convert-Number $cells[8]))
+      $steals = [math]::Round($games * (Convert-Number $cells[9]))
+      $blocks = [math]::Round($games * (Convert-Number $cells[10]))
+      $points = [math]::Round($games * (Convert-Number $cells[11]))
+    } else {
+      $games = Convert-Number $cells[1]
+      $starts = Convert-Number $cells[2]
+      $minutes = [math]::Round((Convert-Number $cells[3]))
+      $rebounds = [math]::Round((Convert-Number $cells[4]))
+      $assists = [math]::Round((Convert-Number $cells[5]))
+      $steals = [math]::Round((Convert-Number $cells[6]))
+      $blocks = [math]::Round((Convert-Number $cells[7]))
+      $points = [math]::Round((Convert-Number $cells[8]))
+    }
+
+    if ($games -le 0) { continue }
+
     $players += [pscustomobject]@{
       Name = $name
-      Games = Convert-Number $cells[1]
-      Starts = Convert-Number $cells[2]
-      Mpg = Convert-Number $cells[3]
-      Rpg = Convert-Number $cells[7]
-      Apg = Convert-Number $cells[8]
-      Spg = Convert-Number $cells[9]
-      Bpg = Convert-Number $cells[10]
-      Ppg = Convert-Number $cells[11]
+      Positions = $positions
+      Games = $games
+      Starts = $starts
+      Minutes = $minutes
+      Points = $points
+      Rebounds = $rebounds
+      Assists = $assists
+      Steals = $steals
+      Blocks = $blocks
     }
   }
   return $players
@@ -131,12 +200,23 @@ function Get-NumberProperty($object, [string]$name) {
   return [double]$property.Value
 }
 
-$raw = Get-Content -LiteralPath $InputFile -Raw -Encoding UTF8
-$match = [regex]::Match($raw, "window\.(?:FULL_ROSTER_PLAYERS|RECENT_ROSTER_PLAYERS)\s*=\s*(\[[\s\S]*\]);?")
-$json = $match.Groups[1].Value
-$records = @($json | ConvertFrom-Json)
+$records = @()
+if (-not $Reset) {
+  $raw = Get-Content -LiteralPath $InputFile -Raw -Encoding UTF8
+  $match = [regex]::Match($raw, "window\.(?:FULL_ROSTER_PLAYERS|RECENT_ROSTER_PLAYERS)\s*=\s*(\[[\s\S]*\]);?")
+  $json = $match.Groups[1].Value
+  $records = @($json | ConvertFrom-Json)
+  $records = @($records | ForEach-Object {
+    if ($_.PSObject.Properties["value"] -and $_.PSObject.Properties["Count"]) {
+      $_.value
+    } else {
+      $_
+    }
+  })
+}
 $byKey = @{}
 foreach ($record in $records) {
+  if (-not $record.name -or -not $record.team -or -not $record.decade) { continue }
   $byKey[(Get-Key $record)] = $record
 }
 
@@ -157,12 +237,12 @@ foreach ($seasonEnd in $StartSeasonEnd..$EndSeasonEnd) {
       foreach ($player in $players) {
         $decade = ConvertTo-Decade $seasonEnd
         $key = "$($team.Name)|$decade|$($player.Name)"
-        $minutes = [math]::Round($player.Games * $player.Mpg)
-        $points = [math]::Round($player.Games * $player.Ppg)
-        $rebounds = [math]::Round($player.Games * $player.Rpg)
-        $assists = [math]::Round($player.Games * $player.Apg)
-        $steals = [math]::Round($player.Games * $player.Spg)
-        $blocks = [math]::Round($player.Games * $player.Bpg)
+        $minutes = [math]::Round($player.Minutes)
+        $points = [math]::Round($player.Points)
+        $rebounds = [math]::Round($player.Rebounds)
+        $assists = [math]::Round($player.Assists)
+        $steals = [math]::Round($player.Steals)
+        $blocks = [math]::Round($player.Blocks)
         if ($byKey.ContainsKey($key)) {
           $record = $byKey[$key]
           if (@($record.seasons) -contains $seasonEnd) {
@@ -186,7 +266,7 @@ foreach ($seasonEnd in $StartSeasonEnd..$EndSeasonEnd) {
             team = $team.Name
             teamCn = $team.Name
             decade = $decade
-            positions = @("SF")
+            positions = @($player.Positions)
             seasons = @($seasonEnd)
             stats = [pscustomobject]@{
               games = [math]::Round($player.Games)
@@ -216,7 +296,7 @@ foreach ($seasonEnd in $StartSeasonEnd..$EndSeasonEnd) {
   }
 }
 
-$output = @($byKey.Values | Sort-Object team, decade, name)
+$output = @($byKey.Values.GetEnumerator() | Sort-Object team, decade, name)
 $payload = "// Generated by tools/import-recent-wikipedia-rosters.ps1`n// Source: Wikipedia season pages through $EndSeasonEnd.`nwindow.RECENT_ROSTER_PLAYERS = " + ($output | ConvertTo-Json -Depth 20) + ";`n"
 Set-Content -LiteralPath $OutputFile -Value $payload -Encoding UTF8
 Write-Host "Wrote $($output.Count) records to $OutputFile; added $addedRows rows, updated $updatedRows rows."
